@@ -9,7 +9,8 @@ create table lineitems
     , position      int not null
     , label         text not null
 
-    , check (position >= 0)
+    , constraint valid_lineitem_parent check (lineitem_id != parent_id)
+    , constraint valid_lineitem_position check (position >= 0)
     , constraint unique_lineitem_position
         unique (parent_id, position)
         deferrable initially immediate
@@ -58,7 +59,7 @@ comment on function insert_lineitem_after is
     'Insert a new line item as the first sibling after the given line item.';
 
 create function delete_lineitem(lineitem_id int)
-    returns void
+    returns bool
     language plpgsql
     as $$
         declare
@@ -82,11 +83,13 @@ create function delete_lineitem(lineitem_id int)
                     and position > target.position;
 
             set constraints unique_lineitem_position immediate;
+
+            return true;
         end;
     $$;
 
 comment on function delete_lineitem is
-    'Delete the given line item.';
+    'Delete the given line item, returning whether the deletion succeeded.';
 
 create function move_lineitem_after(lineitem_id int, target_lineitem_id int)
     returns void
@@ -344,20 +347,43 @@ create function benchmark()
         declare
             id int;
         begin
-            for id
-                in
-                    select lineitem_id
-                        from lineitems tablesample bernoulli (10) repeatable (1)
-                loop
-                    perform delete_lineitem(id);
+            -- delete 10 random items
+            for i in 1..10 loop
+                perform delete_lineitem(lineitem_id)
+                    from lineitems tablesample bernoulli (1) repeatable (i)
+                    limit 1;
+            end loop;
+
+            -- insert random items as first child
+            for i in 1..1000 loop
+                perform insert_lineitem_first(lineitem_id, 'insert_first ' || i)
+                    from lineitems tablesample bernoulli (1) repeatable (i)
+                    limit 1;
+            end loop;
+
+            -- insert random items as first sibling after an item
+            for i in 1..1000 loop
+                perform insert_lineitem_after(lineitem_id, 'insert_after ' || i)
+                    from lineitems tablesample bernoulli (1) repeatable (i)
+                    limit 1;
+            end loop;
+
+            -- move random items to be the first sibling after an item
+            for i in 1..1000 loop
+                perform move_lineitem_after(moved.lineitem_id, target.lineitem_id)
+                    from
+                        (select * from lineitems tablesample bernoulli (1) repeatable (i) limit 1) moved,
+                        (select * from lineitems tablesample bernoulli (1) repeatable (i+100) limit 1) target;
             end loop;
         end
     $$;
 
 select count(*) from lineitems;
 
-select delete_lineitem(lineitem_id) from lineitems tablesample bernoulli (1) repeatable (1);
--- select benchmark();
+select benchmark();
 
 select count(*) from lineitems;
+
+select (repeat('  ', level_) || number || ' ' || label) as "generated tree"
+    from lineitems(0);
 
