@@ -117,7 +117,7 @@ comment on function insert_lineitem_after is
     'Insert a new line item as the first sibling after the given line item.';
 
 create function delete_lineitem(lineitem_id int)
-    returns bool
+    returns void
     language plpgsql
     as $$
         declare
@@ -141,13 +141,11 @@ create function delete_lineitem(lineitem_id int)
                     and position > target.position;
 
             set constraints unique_lineitem_position immediate;
-
-            return true;
         end;
     $$;
 
 comment on function delete_lineitem is
-    'Delete the given line item, returning whether the deletion succeeded.';
+    'Delete the given line item.';
 
 create function move_lineitem_after(lineitem_id int, target_lineitem_id int)
     returns void
