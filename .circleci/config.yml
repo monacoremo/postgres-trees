@@ -1,0 +1,22 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: monacoremo/nix:2020-01-14-f9c81b5c-circleci
+    steps:
+      - checkout
+      - run:
+          name: Pre-load Nix environment for the basic application
+          command: nix-shell --run "echo Loaded basic Nix environment"      
+      - run:
+          name: Grant access to the non-root test user
+          command: |
+            # There must be a better way to do this...
+            chown -R user:user /root/project
+            chmod o+xr /root /root/project
+      - run:
+          name: Run tests for the basic application
+          command: |
+            nix-shell --run \
+              'su-exec user:user ./run.sh'
+
