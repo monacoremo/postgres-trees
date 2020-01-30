@@ -346,7 +346,7 @@ create function generate_tree(root_ids int[], height int, branching_factor int)
     as $$
         with
             items as (
-                insert into lineitem_subtrees(parent_id, position, label)
+                insert into lineitems(parent_id, position, label)
                     select
                             roots.lineitem_id,
                             positions.position,
