@@ -155,7 +155,7 @@ create function delete_lineitem_subtrees(lineitem_id int)
         delete from lineitems
             where lineitem_id in (
                 select lineitem_id 
-                from lineitem_subtrees(delete_linitem_subtrees.lineitem_id)
+                from lineitem_subtrees(delete_lineitem_subtrees.lineitem_id)
             )
     $$;
 
