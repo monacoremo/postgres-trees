@@ -382,7 +382,7 @@ analyze;
 select count(*) from lineitem_subtrees(16);
 
 select (repeat('  ', level_) || number || ' ' || label) as "generated tree"
-    from lineitem_subtress(16)
+    from lineitem_subtrees(16)
     limit 100;
 
 create function benchmark()
