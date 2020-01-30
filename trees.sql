@@ -78,7 +78,7 @@ create function lineitem_subtrees(lineitem_id int)
                 order by path_
     $$;
 
-comment on function lineitems is
+comment on function lineitem_subtrees is
     'Returns the tree of line items starting from a root node.';
 
 create function insert_lineitem_after(lineitem_id int, label text)
