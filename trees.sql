@@ -1,3 +1,4 @@
+-- This script sets up an ordered tree in sql
 
 \set ON_ERROR_STOP on
 
@@ -7,7 +8,7 @@ begin;
 
 create table lineitems
     ( lineitem_id   serial primary key
-    , parent_id     int references lineitems(lineitem_id) on delete cascade
+    , parent_id     int references lineitems(lineitem_id)
     , position      int not null
     , label         text not null
 
@@ -36,7 +37,7 @@ create type lineitem as
 comment on type lineitem is
     'Line item, including its level and path in the tree of line items.';
 
-create function lineitems(root_id int)
+create function lineitem_subtrees(lineitem_id int)
     returns setof lineitem
     language sql
     as $$
@@ -50,7 +51,7 @@ create function lineitems(root_id int)
                         1 level_,
                         array[]::integer[] path_
                     from lineitems
-                    where lineitem_id = root_id
+                    where lineitems.lineitem_id = lineitem_subtrees.lineitem_id
                 union all
                     select
                             children.lineitem_id,
@@ -73,7 +74,7 @@ create function lineitems(root_id int)
                     level_,
                     path_
                 from items
-                where items.lineitem_id != root_id
+                where items.lineitem_id != lineitem_subtrees.lineitem_id
                 order by path_
     $$;
 
@@ -146,6 +147,32 @@ create function delete_lineitem(lineitem_id int)
 
 comment on function delete_lineitem is
     'Delete the given line item.';
+    
+create function delete_lineitem_subtrees(lineitem_id int)
+    returns void
+    language sql
+    as $$
+        delete from lineitems
+            where lineitem_id in (
+                select lineitem_id 
+                from lineitem_subtrees(delete_lineitem_subtrees.lineitem_id)
+            )
+    $$;
+
+comment on function delete_lineitem_subtrees is
+    'Delete the subtrees of the given line item.';
+
+
+create function delete_lineitem_including_subtrees(lineitem_id int)
+    returns void
+    language sql
+    as $$
+        select delete_lineitem_subtrees(lineitem_id);
+        select delete_lineitem(lineitem_id);
+    $$;
+
+comment on function delete_lineitem_including_subtrees is
+    'Delete the subtrees of the given line item and the given lineitem itself.';
 
 create function move_lineitem_after(lineitem_id int, target_lineitem_id int)
     returns void
@@ -299,7 +326,7 @@ analyze;
 
 \timing
 
-select (repeat('  ', level_) || number || ' ' || label) as before from lineitems(0);
+select (repeat('  ', level_) || number || ' ' || label) as before from lineitem_subtrees(0);
 
 select insert_lineitem_after(4, 'test');
 select delete_lineitem(7);
@@ -307,13 +334,13 @@ select move_lineitem_after(1, 13);
 select insert_lineitem_first(0, 'first!');
 select move_lineitem_first(4, 9);
 
-select (repeat('  ', level_) || number || ' ' || label) as after from lineitems(0);
+select (repeat('  ', level_) || number || ' ' || label) as after from lineitem_subtrees(0);
 
-select (repeat('  ', level_) || number || ' ' || label) as subtree from lineitems(9);
+select (repeat('  ', level_) || number || ' ' || label) as subtree from lineitem_subtrees(9);
 
 \echo 'Generating tree...'
 
-create function generate_tree(root_ids int[], depth int, fanout int)
+create function generate_tree(root_ids int[], height int, branching_factor int)
     returns void
     language sql
     as $$
@@ -326,13 +353,13 @@ create function generate_tree(root_ids int[], depth int, fanout int)
                             'generated ' || roots.lineitem_id || '-' || positions.position
                         from
                             unnest(root_ids) roots(lineitem_id),
-                            generate_series(0, fanout - 1) positions(position)
+                            generate_series(0, branching_factor - 1) positions(position)
                     returning lineitem_id
             )
         select
-            case when depth > 1 then
+            case when height > 1 then
                 (select
-                    generate_tree(array_agg(lineitem_id), depth - 1, fanout)
+                    generate_tree(array_agg(lineitem_id), height - 1, branching_factor)
                     from items)
             end
     $$;
@@ -346,15 +373,16 @@ select * from lineitems where parent_id is null;
 
 -- The size of the generated tree can be tuned here. The number of generated
 -- nodes, starting from one root node, can be calculated as
--- 'sum(fanout**(i + 1) for i in range(depth))'
-select generate_tree(array[16], depth => 4, fanout => 10);
+-- 'sum(branching_factor**(i + 1) for i in range(height))' or
+-- '(branching_factor**(height + 1) - 1) / (branching_factor - 1)'
+select generate_tree(array[16], height => 4, branching_factor => 10);
 
 analyze;
 
-select count(*) from lineitems(16);
+select count(*) from lineitem_subtrees(16);
 
 select (repeat('  ', level_) || number || ' ' || label) as "generated tree"
-    from lineitems(16)
+    from lineitem_subtrees(16)
     limit 100;
 
 create function benchmark()
@@ -384,7 +412,7 @@ create function benchmark()
 
             raise notice 'Deleting some random items...';
             for i in 1..100 loop
-                perform delete_lineitem(lineitem_id)
+                perform delete_lineitem_including_subtrees(lineitem_id)
                     from lineitems tablesample bernoulli (1) repeatable (i)
                     limit 1;
             end loop;
@@ -398,7 +426,7 @@ select benchmark();
 select count(*) from lineitems;
 
 select (repeat('  ', level_) || number || ' ' || label) as "generated tree"
-    from lineitems(0);
+    from lineitem_subtrees(0);
 
 rollback to savepoint before_tests;
 
